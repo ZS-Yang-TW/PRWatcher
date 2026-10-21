@@ -6,9 +6,12 @@ enum StatusIcon {
     /// Pull-request glyph (two branches, the right one merging back with an arrow).
     /// With `badge`, a yellow symbol replaces the bottom-right node; that version can't be
     /// a template image, so it resolves labelColor against the menu bar's appearance at draw time.
-    static func make(badge: Bool) -> NSImage {
+    /// With `paused` (and no badge), a pause symbol replaces that node instead.
+    static func make(badge: Bool, paused: Bool = false) -> NSImage {
+        let corner = badge || paused
         let image = NSImage(size: NSSize(width: 20, height: 18), flipped: true) { _ in
-            NSColor.labelColor.set()
+            // As a template only alpha matters, and labelColor isn't fully opaque.
+            (badge ? NSColor.labelColor : .black).set()
             let r: CGFloat = 2.3
             func ring(_ x: CGFloat, _ y: CGFloat) -> NSBezierPath {
                 NSBezierPath(ovalIn: NSRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
@@ -24,8 +27,8 @@ enum StatusIcon {
             path.line(to: NSPoint(x: 4.5, y: 14.5 - r))
             path.append(ring(4.5, 14.5))
             // Right branch curving back to the left with an arrowhead.
-            if !badge { path.append(ring(13.5, 14.5)) }
-            path.move(to: NSPoint(x: 13.5, y: badge ? 7.2 : 14.5 - r))
+            if !corner { path.append(ring(13.5, 14.5)) }
+            path.move(to: NSPoint(x: 13.5, y: corner ? 7.2 : 14.5 - r))
             path.line(to: NSPoint(x: 13.5, y: 7))
             path.curve(to: NSPoint(x: 10.5, y: 4), controlPoint1: NSPoint(x: 13.5, y: 5.3), controlPoint2: NSPoint(x: 12.2, y: 4))
             path.line(to: NSPoint(x: 8, y: 4))
@@ -36,9 +39,10 @@ enum StatusIcon {
 
             // Palette: single-layer symbols take the first color; ones like
             // exclamationmark.circle.fill draw the mark in the first and the disc in the second.
-            let palette = NSImage.SymbolConfiguration(paletteColors: badgeSymbol.hasSuffix("circle.fill")
-                ? [.black, .systemYellow] : [.systemYellow])
-            if badge, let symbol = NSImage(systemSymbolName: badgeSymbol, accessibilityDescription: nil)?
+            let palette = !badge ? NSImage.SymbolConfiguration(paletteColors: [.black])
+                : NSImage.SymbolConfiguration(paletteColors: badgeSymbol.hasSuffix("circle.fill")
+                    ? [.black, .systemYellow] : [.systemYellow])
+            if corner, let symbol = NSImage(systemSymbolName: badge ? badgeSymbol : "pause.fill", accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .bold).applying(palette)) {
                 // Aspect-fit into the bottom-right corner.
                 let box = NSRect(x: 9, y: 7, width: 11, height: 11)

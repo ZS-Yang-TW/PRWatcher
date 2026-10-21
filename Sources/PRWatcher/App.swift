@@ -34,15 +34,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         button.action = #selector(togglePopover)
         button.setAccessibilityLabel("PR Watcher")
 
+        // Paused shows a pause symbol; unread updates take that spot with a yellow badge,
+        // so in that case dimming is what still tells you checks are paused.
         store.$prs
             .map { $0.contains(where: \.unseen) }
             .removeDuplicates()
-            .sink { unseen in button.image = StatusIcon.make(badge: unseen) }
-            .store(in: &cancellables)
-
-        // Dim the icon while automatic checks are paused.
-        store.$paused
-            .sink { button.appearsDisabled = $0 }
+            .combineLatest(store.$paused)
+            .sink { unseen, paused in
+                button.image = StatusIcon.make(badge: unseen, paused: paused)
+                button.appearsDisabled = paused && unseen
+            }
             .store(in: &cancellables)
     }
 
