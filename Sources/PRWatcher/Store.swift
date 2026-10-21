@@ -124,7 +124,9 @@ final class PRStore: ObservableObject {
     func checkAll() async {
         guard !pat.isEmpty, !isChecking else { return }
         isChecking = true
-        defer { isChecking = false; lastRun = Date() }
+        // Restart the timer so the next automatic check really happens at nextRun,
+        // including after a manual refresh.
+        defer { isChecking = false; lastRun = Date(); startTimer() }
 
         var selfIds: [String: String] = [:]
         for base in Set(prs.map(\.ref.baseURL)) {

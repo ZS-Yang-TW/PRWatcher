@@ -180,10 +180,14 @@ struct ContentView: View {
                 Image(systemName: store.paused ? "play.fill" : "pause.fill")
             }
             .help(store.paused ? "繼續自動檢查" : "暫停自動檢查")
+            if let last = store.lastRun {
+                Text("上次檢查 \(last.formatted(date: .omitted, time: .shortened))")
+                    .foregroundStyle(.secondary)
+            }
             if store.paused {
                 Text("已暫停自動檢查").foregroundStyle(.orange)
             } else if let next = store.nextRun {
-                Text("下次檢查 \(next.formatted(date: .omitted, time: .shortened))")
+                Text("· 下次 \(next.formatted(date: .omitted, time: .shortened))")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -234,7 +238,7 @@ struct PRRow: View {
                 } else if !pr.lastChanges.isEmpty, let date = pr.lastChangeDate {
                     VStack(alignment: .leading, spacing: 1) {
                         ForEach(pr.lastChanges.prefix(3), id: \.self) { Text("• \($0)").lineLimit(1) }
-                        Text(date.formatted(.relative(presentation: .named))).foregroundStyle(.tertiary)
+                        Text("變更於 \(date.formatted(.relative(presentation: .named)))").foregroundStyle(.tertiary)
                     }
                     .font(.caption).foregroundStyle(.secondary)
                 }
