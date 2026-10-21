@@ -39,11 +39,26 @@ struct Snapshot: Codable, Equatable {
 struct NewComment {
     let author: String
     let content: String
+    let date: Date?
+}
+
+/// A system comment Azure DevOps posts for votes, draft/status changes, etc.
+struct SystemEvent {
+    let author: String
+    let date: Date
 }
 
 struct FetchResult {
     let snapshot: Snapshot
     let comments: [String: NewComment]   // keyed like Snapshot.commentKeys
+    let systemEvents: [SystemEvent]
+    let closedDate: Date?
+}
+
+/// What changed since the last check, and when it happened on Azure DevOps.
+struct Changes {
+    var lines: [String] = []
+    var date: Date?
 }
 
 enum AzureError: LocalizedError {
@@ -63,6 +78,7 @@ enum AzureDevOps {
         let title: String
         let status: String
         let isDraft: Bool?
+        let closedDate: String?
         let reviewers: [Reviewer]?
         struct Reviewer: Decodable { let displayName: String; let vote: Int }
     }
@@ -75,6 +91,7 @@ enum AzureDevOps {
             let content: String?
             let commentType: String?
             let isDeleted: Bool?
+            let publishedDate: String?
             let author: Author
         }
         struct Author: Decodable { let id: String; let displayName: String }
@@ -91,17 +108,34 @@ enum AzureDevOps {
         let (p, t) = try await (pr, threads)
 
         var comments: [String: NewComment] = [:]
+        var systemEvents: [SystemEvent] = []
         for thread in t.value where thread.isDeleted != true {
-            for c in thread.comments ?? [] where c.isDeleted != true && c.commentType == "text" {
+            for c in thread.comments ?? [] where c.isDeleted != true {
+                if c.commentType == "system" {
+                    if let date = parseDate(c.publishedDate) {
+                        systemEvents.append(SystemEvent(author: c.author.displayName, date: date))
+                    }
+                    continue
+                }
+                guard c.commentType == "text" else { continue }
                 // Your own replies are not "updates" worth notifying about.
                 if let selfId, c.author.id == selfId { continue }
-                comments["\(thread.id)-\(c.id)"] = NewComment(author: c.author.displayName, content: c.content ?? "")
+                comments["\(thread.id)-\(c.id)"] = NewComment(author: c.author.displayName, content: c.content ?? "",
+                                                               date: parseDate(c.publishedDate))
             }
         }
         let votes = Dictionary((p.reviewers ?? []).map { ($0.displayName, $0.vote) }, uniquingKeysWith: { a, _ in a })
         let snap = Snapshot(title: p.title, status: p.status, isDraft: p.isDraft ?? false,
                             votes: votes, commentKeys: Set(comments.keys))
-        return FetchResult(snapshot: snap, comments: comments)
+        return FetchResult(snapshot: snap, comments: comments, systemEvents: systemEvents,
+                           closedDate: parseDate(p.closedDate))
+    }
+
+    /// Azure DevOps timestamps are UTC with up to 7 fractional digits ("2026-10-21T08:12:34.1234567Z"),
+    /// more than ISO8601DateFormatter accepts, so drop the fraction.
+    static func parseDate(_ s: String?) -> Date? {
+        guard let s, s.count >= 19 else { return nil }
+        return ISO8601DateFormatter().date(from: s.prefix(19) + "Z")
     }
 
     /// The id of the user who owns the PAT, used to ignore your own comments.
@@ -134,24 +168,40 @@ enum AzureDevOps {
     }
 
     /// Human-readable list of what changed between two snapshots.
-    static func describeChanges(old: Snapshot, new: FetchResult) -> [String] {
+    static func describeChanges(old: Snapshot, new: FetchResult) -> Changes {
         let snap = new.snapshot
-        var lines: [String] = []
-        if old.status != snap.status { lines.append("狀態變更：\(old.status) → \(snap.status)") }
-        if old.isDraft && !snap.isDraft { lines.append("已從 Draft 發布") }
+        var changes = Changes()
+        // The latest change wins; system events stand in for changes that carry no timestamp of their own.
+        func happened(_ date: Date?) {
+            guard let date else { return }
+            changes.date = max(changes.date ?? date, date)
+        }
+        let latestSystemEvent = new.systemEvents.map(\.date).max()
+
+        if old.status != snap.status {
+            changes.lines.append("狀態變更：\(old.status) → \(snap.status)")
+            happened(snap.status == "active" ? latestSystemEvent : new.closedDate ?? latestSystemEvent)
+        }
+        if old.isDraft && !snap.isDraft {
+            changes.lines.append("已從 Draft 發布")
+            happened(latestSystemEvent)
+        }
         for (name, vote) in snap.votes.sorted(by: { $0.key < $1.key }) {
             let before = old.votes[name]
             if before == nil && vote == 0 {
-                lines.append("新增 reviewer：\(name)")
+                changes.lines.append("新增 reviewer：\(name)")
+                happened(latestSystemEvent)
             } else if (before ?? 0) != vote {
-                lines.append("\(name)：\(voteText(vote))")
+                changes.lines.append("\(name)：\(voteText(vote))")
+                happened(new.systemEvents.filter { $0.author == name }.map(\.date).max() ?? latestSystemEvent)
             }
         }
         for key in snap.commentKeys.subtracting(old.commentKeys).sorted() {
             guard let c = new.comments[key] else { continue }
             let text = c.content.replacingOccurrences(of: "\n", with: " ")
-            lines.append("\(c.author) 留言：\(text.prefix(80))")
+            changes.lines.append("\(c.author) 留言：\(text.prefix(80))")
+            happened(c.date)
         }
-        return lines
+        return changes
     }
 }

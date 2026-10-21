@@ -150,11 +150,11 @@ final class PRStore: ObservableObject {
                 prs[i].error = nil
                 if let old = prs[i].snapshot {
                     let changes = AzureDevOps.describeChanges(old: old, new: fetched)
-                    if !changes.isEmpty {
-                        prs[i].lastChanges = changes
-                        prs[i].lastChangeDate = Date()
+                    if !changes.lines.isEmpty {
+                        prs[i].lastChanges = changes.lines
+                        prs[i].lastChangeDate = changes.date ?? Date()
                         prs[i].unseen = true
-                        notify(title: fetched.snapshot.title, lines: changes, url: pr.url)
+                        notify(title: fetched.snapshot.title, lines: changes.lines, url: pr.url)
                     }
                 }
                 prs[i].snapshot = fetched.snapshot
