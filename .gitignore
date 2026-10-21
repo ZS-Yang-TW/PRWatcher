@@ -1,0 +1,13 @@
+# 建置產物
+.build/
+build/
+*.app
+.swiftpm/
+DerivedData/
+Package.resolved
+
+# 機敏資訊
+.env
+*.env
+
+.DS_Store
